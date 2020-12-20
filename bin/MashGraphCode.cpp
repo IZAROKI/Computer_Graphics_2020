@@ -1,7 +1,7 @@
 #include <iostream>
 #include <fstream>
 
-float eps = 0.0001;
+using namespace std;
 
 class ColorClass {
 public:
@@ -117,30 +117,43 @@ CoordClass Global_GetCross(CoordClass tmpClass1, CoordClass tmpClass2) {
 	return cross;
 }
 
+CoordClass Global_GetReflectRay(CoordClass raydircoords, CoordClass normalcoords) {
+	return normalcoords * (2 * Global_GetScalar(normalcoords, raydircoords)) - raydircoords;
+}
+
+float RandFloat() {
+	return rand() / (float)(RAND_MAX);
+}
+
+CoordClass RandomCoords() {
+	CoordClass temp(RandFloat(), RandFloat(), RandFloat());
+	temp.BuildNormal();
+	return temp;
+}
 
 class LightSourceClass {
 public:
-	CoordClass leftboarder, rightboarder;
+	CoordClass leftcoords, rightcoords;
 	CoordClass* lightcoords;
 	int segments = 30;
 	float intense, partofintense;
 
-	LightSourceClass(CoordClass tmpLeft, CoordClass tmpRight, float tmpIntens) {
-		leftboarder = tmpLeft;
-		rightboarder = tmpRight;
+	LightSourceClass(CoordClass tmpLeftcoords, CoordClass tmpRightcoords, float tmpIntens) {
+		leftcoords = tmpLeftcoords;
+		rightcoords = tmpRightcoords;
 		intense = tmpIntens;
 		partofintense = intense / ((float)(segments));
 		lightcoords = new CoordClass[segments];
 		float t = 0.0f;
 		for (int i = 0; i < segments; i++) {
-			lightcoords[i] = leftboarder + (rightboarder - leftboarder) * t;
-			t += 0.033333;
+			lightcoords[i] = leftcoords + (rightcoords - leftcoords) * t;
+			t += 0.0333f; //при умножении на segments должна выйти 1
 		}
 	}
 
 	LightSourceClass(const LightSourceClass& tmpClass) {
-		leftboarder = tmpClass.leftboarder;
-		rightboarder = tmpClass.rightboarder;
+		leftcoords = tmpClass.leftcoords;
+		rightcoords = tmpClass.rightcoords;
 		intense = tmpClass.intense;
 		segments = tmpClass.segments;
 		partofintense = tmpClass.partofintense;
@@ -216,16 +229,14 @@ public:
 
 	//FUNCTION
 	void WriteInFile() {
-		std::ofstream Render_File("RENDER.ppm");
+		ofstream Render_File("RENDER.ppm");
 
-		Render_File << "P3" << std::endl;
-		Render_File << width << " " << height << std::endl;
-		Render_File << "255" << std::endl;
+		Render_File << "P3" << endl;
+		Render_File << width << " " << height << endl;
+		Render_File << "255" << endl;
 
 		for (int i = 0; i < width * height; i++) {
-			Render_File << pixeldata[i].red << " "
-				<< pixeldata[i].green << " "
-				<< pixeldata[i].blue << std::endl;
+			Render_File << pixeldata[i].red << " " << pixeldata[i].green << " " << pixeldata[i].blue << endl;
 		}
 
 		Render_File.close();
@@ -237,14 +248,15 @@ public:
 	ColorClass color;
 	int specular = 0;
 	float reflective = 0;
+	float gloss = 0;
 
 	GraphObjectClass() {};
 
 	virtual ~GraphObjectClass() {};
 
-	virtual float CheckIntersection(CoordClass& camPos, CoordClass& ray) = 0;
+	virtual float GetIntersection(CoordClass& raystartcoords, CoordClass& raydircoords) = 0;
 
-	virtual CoordClass GetNormal(CoordClass& onSurf) const = 0;
+	virtual CoordClass GetNormal(CoordClass& intersectioncoords) const = 0;
 
 	//FUNCTION
 	ColorClass GetColor() {
@@ -258,37 +270,45 @@ public:
 	float GetReflective() {
 		return reflective;
 	}
+	//FUNCTION
+	float GetGloss() {
+		return gloss;
+	}
 };
 
 class SphereClass : public GraphObjectClass {
-public:
+protected:
 	float radius;
 	CoordClass centercoords;
 
-	SphereClass(float tmpRed, int tmpSpecular, ColorClass tmpColor, CoordClass tmpCenterPos, float tmpReflective) {
-		radius = tmpRed;
-		specular = tmpSpecular;
+public:
+	SphereClass(ColorClass tmpColor, CoordClass tmpCentercoords, float tmpRadius, int tmpSpecular, float tmpReflective, float tmpGloss) {
 		color = tmpColor;
-		centercoords = tmpCenterPos;
+		centercoords = tmpCentercoords;
+		radius = tmpRadius;
+		specular = tmpSpecular;
 		reflective = tmpReflective;
+		gloss = tmpGloss;
 	}
 
 	SphereClass() {
-		radius = 0;
-		specular = 0;
 		color.red = 0;
 		color.green = 0;
 		color.blue = 0;
+		radius = 0;
+		specular = 0;
 		CoordClass centercoords(0, 0, 0);
 		reflective = 0;
+		gloss = 0;
 	}
 
 	SphereClass(const SphereClass& tmpClass) {
-		radius = tmpClass.radius;
-		specular = tmpClass.specular;
 		color = tmpClass.color;
 		centercoords = tmpClass.centercoords;
+		radius = tmpClass.radius;
+		specular = tmpClass.specular;
 		reflective = tmpClass.reflective;
+		gloss = tmpClass.gloss;
 	}
 
 	~SphereClass() {};
@@ -299,17 +319,16 @@ public:
 	}
 
 	//FUNCTION
-	CoordClass GetNormal(CoordClass& onSurf) const {
-		return onSurf - centercoords;
+	CoordClass GetNormal(CoordClass& intersectioncoords) const {
+		return intersectioncoords - centercoords;
 	}
 
 	//FUNCTION
-	float CheckIntersection(CoordClass& camPos, CoordClass& ray) {
-		CoordClass toCentre = camPos - centercoords;
-
-		float a = Global_GetScalar(ray, ray);
-		float b = (2 * Global_GetScalar(toCentre, ray));
-		float c = Global_GetScalar(toCentre, toCentre) - radius * radius;
+	float GetIntersection(CoordClass& raystartcoords, CoordClass& raydircoords) {
+		CoordClass centerdircoords = raystartcoords - centercoords;
+		float a = Global_GetScalar(raydircoords, raydircoords);
+		float b = (2 * Global_GetScalar(centerdircoords, raydircoords));
+		float c = Global_GetScalar(centerdircoords, centerdircoords) - radius * radius;
 		float D = b * b - 4 * a * c;
 
 		if (D < 0) {
@@ -330,275 +349,298 @@ class TriangleClass : public GraphObjectClass {
 public:
 	CoordClass* vertex;
 
-	TriangleClass(CoordClass tmpVertex1, CoordClass tmpVertex2, CoordClass tmpVertex3, int tmpSpecular, ColorClass tmpColor, float tmpReflective) {
+	TriangleClass(ColorClass tmpColor, CoordClass tmpVertex1, CoordClass tmpVertex2, CoordClass tmpVertex3, int tmpSpecular, float tmpReflective, float tmpGloss) {
+		color = tmpColor;
 		vertex = new CoordClass[3];
 		vertex[0] = tmpVertex1;
 		vertex[1] = tmpVertex2;
 		vertex[2] = tmpVertex3;
 		specular = tmpSpecular;
-		color = tmpColor;
 		reflective = tmpReflective;
+		gloss = tmpGloss;
 	}
 
 	TriangleClass() {
+		ColorClass color;
 		vertex = new CoordClass[3];
 		specular = 0;
-		ColorClass color;
-		reflective = 0.0f;
+		reflective = 0;
+		gloss = 0;
 	};
 
 	TriangleClass(const TriangleClass& tmpClass) {
+		color = tmpClass.color;
 		vertex = new CoordClass[3];
 		for (int i = 0; i < 3; i++) {
 			vertex[i] = tmpClass.vertex[i];
 		}
 		specular = tmpClass.specular;
-		color = tmpClass.color;
 		reflective = tmpClass.reflective;
+		gloss = tmpClass.gloss;
 	}
 
 	~TriangleClass() { delete[] vertex; }
 
 	//FUNCTION
-	CoordClass GetNormal(CoordClass& onSurf) const {
+	CoordClass GetNormal(CoordClass& intersectioncoords) const {
 		CoordClass vectorAB = vertex[0] - vertex[1];
 		CoordClass vectorBC = vertex[1] - vertex[2];
 		return Global_GetCross(vectorAB, vectorBC);
 	}
 
 	//FUNCTION
-	float CheckIntersect(CoordClass& camPos, CoordClass& ray) {
+	float GetIntersection(CoordClass& raystartcoords, CoordClass& raydircoords) {
 		CoordClass e1 = vertex[1] - vertex[0];
 		CoordClass e2 = vertex[2] - vertex[0];
-		CoordClass x = Global_GetCross(ray, e2);
+		CoordClass x = Global_GetCross(raydircoords, e2);
 		float det = Global_GetScalar(e1, x);
+		float eps = 0.0001f;
 
 		if (det > -eps && det < eps) {
 			return -1;
 		}
 
-		CoordClass s = camPos - vertex[0];
-		float u = (1.0 / det) * Global_GetScalar(s, x);
+		CoordClass s = raystartcoords - vertex[0];
+		float u = (1.0f / det) * Global_GetScalar(s, x);
 
 		if (u < 0 || u > 1) {
 			return -1;
 		}
 
 		CoordClass y = Global_GetCross(s, e1);
-		float v = (1.0 / det) * Global_GetScalar(ray, y);
+		float v = (1.0f / det) * Global_GetScalar(raydircoords, y);
 
 		if (v < 0 || v > 1 || u + v > 1) {
 			return -1;
 		}
 
-		return (1.0 / det) * Global_GetScalar(e2, y);
+		return (1.0f / det) * Global_GetScalar(e2, y);
 	}
 };
 
 class PlaneClass : public GraphObjectClass {
 protected:
-	CoordClass normal;
 	float distance;
+	CoordClass normalcoords;
 
 public:
-	PlaneClass(CoordClass tmpNormal, int tmpSpecular, ColorClass tmpColor, float tmpDistance, float tmpReflective) {
-		normal = tmpNormal;
-		specular = tmpSpecular;
+	PlaneClass(ColorClass tmpColor, CoordClass tmpNormalcoords, float tmpDistance, int tmpSpecular, float tmpReflective, float tmpGloss) {
 		color = tmpColor;
+		normalcoords = tmpNormalcoords;
 		distance = tmpDistance;
+		specular = tmpSpecular;
 		reflective = tmpReflective;
+		gloss = tmpGloss;
 	}
 
 	~PlaneClass() {};
 
 	//FUNCTION
-	CoordClass GetNormal(CoordClass& onSurf) const {
-		return normal;
+	CoordClass GetNormal(CoordClass& intersectioncoords) const {
+		return normalcoords;
 	}
 
 	//FUNCTION
-	float CheckIntersection(CoordClass& camPos, CoordClass& ray) {
-		return -((distance + Global_GetScalar(camPos, normal)) / Global_GetScalar(ray, normal));
+	float GetIntersection(CoordClass& raystartcoords, CoordClass& raydircoords) {
+		return -((distance + Global_GetScalar(raystartcoords, normalcoords)) / Global_GetScalar(raydircoords, normalcoords));
 	}
 };
 
 
 //GLOBAL_FUNCTION
-CoordClass Global_GetReflectRay(CoordClass ray, CoordClass normal) {
-	return normal * (2 * Global_GetScalar(normal, ray)) - ray;
-}
+GraphObjectClass* CheckIntersection(float& t, GraphObjectClass** array, CoordClass raystartcoords, CoordClass raydircoords, float tMin, float tMax, int NumberOfGraphObjects) {
+	GraphObjectClass* nearestgraphobject = nullptr;
+	float tTmp;
+	float tNearest = 1000000;
+	float eps = 0.0001f;
 
-//GLOBAL_FUNCTION
-GraphObjectClass* CheckForIntersect(float& t, GraphObjectClass** array, CoordClass camPos, CoordClass ray, float tMin, float tMax) {
-	GraphObjectClass* closestObj = nullptr;
-	float tempT;
-	float closestT = 1000000;
-
-	for (int i = 0; i < 3; i++) {
-		tempT = array[i]->CheckIntersection(camPos, ray);
-		if ((tempT - tMin > eps) && (tMax - tempT > eps) && (closestT - tempT > eps)) {
-			closestT = tempT;
-			closestObj = array[i];
+	for (int i = 0; i < NumberOfGraphObjects; i++) {
+		tTmp = array[i]->GetIntersection(raystartcoords, raydircoords);
+		if ((tTmp - tMin > eps) && (tMax - tTmp > eps) && (tNearest - tTmp > eps)) {
+			tNearest = tTmp;
+			nearestgraphobject = array[i];
 		}
 	}
 
-	t = closestT;
-	return closestObj;
+	t = tNearest;
+	return nearestgraphobject;
 }
 
 //GLOBAL_FUNCTION
-float ComputeLight(LightSourceClass& longLight, GraphObjectClass** array, CoordClass onSurf, CoordClass normal, CoordClass minusRay, GraphObjectClass* closestObj) {
-	float n, r, intense = 0;
-	float shadowT;
-	CoordClass lightDirect, refection;
-	CoordClass null;
-	GraphObjectClass* shadowObj = nullptr;
+float RenderLight(LightSourceClass& longlightsource, GraphObjectClass** array, CoordClass intersectioncoords, CoordClass normalcoords, CoordClass reverceraycoords, GraphObjectClass* nearestgraphobject, int NumberOfGraphObjects) {
+	float n, r, tShadow;
+	float intense = 0;
+	float eps = 0.0001f;
+	CoordClass lightsourcedircoords, reflection, null;
+	GraphObjectClass* ShadowGraphObject = nullptr;
 
-	for (int i = 0; i < longLight.segments; i++) {
-		lightDirect = longLight.GetCoords(i) - onSurf;
-		lightDirect.BuildNormal();
+	for (int i = 0; i < longlightsource.segments; i++) {
+		lightsourcedircoords = longlightsource.GetCoords(i) - intersectioncoords;
+		lightsourcedircoords.BuildNormal();
 
-		//shadow
-		shadowObj = CheckForIntersect(shadowT, array, onSurf, lightDirect, 0.1, 1000000);
-		if (shadowObj != nullptr) {
+
+		ShadowGraphObject = CheckIntersection(tShadow, array, intersectioncoords, lightsourcedircoords, 0.1f, 1000000.f, NumberOfGraphObjects);
+		if (ShadowGraphObject != nullptr) {
 			continue;
 		}
 
-		//diffuse light
-		n = Global_GetScalar(normal, lightDirect);
+
+		n = Global_GetScalar(normalcoords, lightsourcedircoords);
 		if (n > eps) {
-			intense += longLight.GetIntense() * n / (Global_GetLength(normal) * Global_GetLength(lightDirect));
+			intense += longlightsource.GetIntense() * n / (Global_GetLength(normalcoords) * Global_GetLength(lightsourcedircoords));
 		}
 
-		//sparkling
-		if ((closestObj->GetSpecular() != 0)) {
-			CoordClass reflection = Global_GetReflectRay(lightDirect, normal);
+
+		if ((nearestgraphobject->GetSpecular() != 0)) {
+			CoordClass reflection = Global_GetReflectRay(lightsourcedircoords, normalcoords);
 			reflection.BuildNormal();
-			r = Global_GetScalar(reflection, minusRay);
+			r = Global_GetScalar(reflection, reverceraycoords);
 			if (r > eps) {
-				intense += longLight.GetIntense() * pow((r / (Global_GetLength(reflection) * Global_GetLength(minusRay))), closestObj->GetSpecular());
+				intense += longlightsource.GetIntense() * pow((r / (Global_GetLength(reflection) * Global_GetLength(reverceraycoords))), nearestgraphobject->GetSpecular());
 			}
 		}
 	}
 
-	if (intense > 0.8) {
-		intense = 0.8;
-	}
+	if (intense > 0.8f) { intense = 0.8f; }
 
 	return intense;
 }
 
 //GLOBAL_FUNCTION
-ColorClass ColorToPut(float ambientLight, CoordClass& camPos, CoordClass& ray, GraphObjectClass** array, LightSourceClass& longLight, float depth) {
-	float closestT;
-	float i;
-	ColorClass black;
-	ColorClass tempColor, reflectedColor;
-	CoordClass refRay;
-	GraphObjectClass* closestObj;
-	CoordClass null;
+ColorClass RenderColor(float ambientlight, CoordClass& raystartcoords, CoordClass& raydircoords, GraphObjectClass** array, LightSourceClass& longlightsource, float depth, int NumberOfGraphObjects) {
+	float tNearest;
+	int rayspack = 3;
+	ColorClass black, tmpcolor, reflectedcolor, totalreflectedcolor, totalcolor;
+	CoordClass reflectedraycoords, null;
+	GraphObjectClass* nearestgraphobject;
 
-	closestObj = CheckForIntersect(closestT, array, camPos, ray, 0.0, 1000000);
+	nearestgraphobject = CheckIntersection(tNearest, array, raystartcoords, raydircoords, 0.0f, 1000000.f, NumberOfGraphObjects);
 
-	if (closestObj == nullptr) {
+	if (nearestgraphobject == nullptr) {
 		return black;
 	}
 
-	CoordClass onSurf = camPos + ray * closestT;
-	CoordClass normal = closestObj->GetNormal(onSurf);
-	normal.BuildNormal();
+	CoordClass intersectioncoords = raystartcoords + raydircoords * tNearest;
+	CoordClass normalcoords = nearestgraphobject->GetNormal(intersectioncoords);
+	normalcoords.BuildNormal();
+	tmpcolor = nearestgraphobject->GetColor() * (RenderLight(longlightsource, array, intersectioncoords, normalcoords, null - raydircoords, nearestgraphobject, NumberOfGraphObjects) + ambientlight);
 
-	tempColor = closestObj->GetColor() * (ComputeLight(longLight, array, onSurf, normal, null - ray, closestObj) + ambientLight);
-
-	if ((depth <= 0) || (closestObj->GetReflective() < 0)) {
-		return tempColor;
+	if ((depth <= 0) || (nearestgraphobject->GetReflective() < 0)) {
+		return tmpcolor;
 	}
 
-	refRay = Global_GetReflectRay(null - ray, normal);
+	if (nearestgraphobject->GetReflective() != 0.0f) {
+		for (int i = 0; i < rayspack; i++) {
+			reflectedraycoords = Global_GetReflectRay(null - raydircoords, normalcoords) + RandomCoords() * nearestgraphobject->GetGloss();
+			reflectedcolor = RenderColor(ambientlight, intersectioncoords, reflectedraycoords, array, longlightsource, depth - 1.0f, NumberOfGraphObjects);
+			totalreflectedcolor.red += (int)(reflectedcolor.red * 1 / ((float)(rayspack)));
+			totalreflectedcolor.green += (int)(reflectedcolor.green * 1 / ((float)(rayspack)));
+			totalreflectedcolor.blue += (int)(reflectedcolor.blue * 1 / ((float)(rayspack)));
 
-	reflectedColor = ColorToPut(ambientLight, onSurf, refRay, array, longLight, depth - (float)(1));
+		}
+	}
 
-	return tempColor * (1 - closestObj->GetReflective()) + reflectedColor * (closestObj->GetReflective());
+	totalcolor = tmpcolor * (1 - nearestgraphobject->GetReflective()) + totalreflectedcolor * (nearestgraphobject->GetReflective());
+
+	return totalcolor;
 }
 
 //GLOBAL_FUNCTION
-void SimpleRender(ImageClass& image, GraphObjectClass** array, LightSourceClass& longLight) {
+void RenderSceneFunction(ImageClass& image, GraphObjectClass** array, LightSourceClass& longlightsource, int NumberOfGraphObjects) {
 	int pointer = 0;
-	float anti = 0.5f;
-	float ambientLight = 0.2f;
-	ColorClass totalColor, tempColor;
-	float r, g, b;
-	CoordClass camPos;
-	float depth = 5.0f;
+	float tmpred, tmpgreen, tmpblue;
+	float antialiasing = 0.25f;
+	float ambientlight = 0.2f; //минимальное освещение сцены (по умолчанию)
+	float depth = 3.0f; //глубина (количество) отражений
+	ColorClass tmpcolor, totalcolor;
+	CoordClass raystartcoords;
 
 	float distance = (float)(image.GetWidth() + image.GetHeight()) / 2;
 
 	for (int y = -(image.GetHeight() / 2); y < image.GetHeight() / 2; y++) {
 		for (int x = -(image.GetWidth() / 2); x < image.GetWidth() / 2; x++) {
 
-			r = 0;
-			g = 0;
-			b = 0;
+			tmpred = 0;
+			tmpgreen = 0;
+			tmpblue = 0;
 
-			for (float newY = (float)(y); newY < (float)(y + 1); newY = newY + anti) {
-				for (float newX = (float)(x); newX < (float)(x + 1); newX = newX + anti) {
+			for (float newY = (float)(y); newY < (float)(y + 1); newY = newY + antialiasing) {
+				for (float newX = (float)(x); newX < (float)(x + 1); newX = newX + antialiasing) {
 
-					CoordClass newRay(newX, -newY, distance);
-					newRay.BuildNormal();
-					tempColor = ColorToPut(ambientLight, camPos, newRay, array, longLight, depth);
-					r += tempColor.red * anti * anti;
-					g += tempColor.green * anti * anti;
-					b += tempColor.blue * anti * anti;
+					CoordClass newraycoords(newX, -newY, distance);
+					newraycoords.BuildNormal();
+					tmpcolor = RenderColor(ambientlight, raystartcoords, newraycoords, array, longlightsource, depth, NumberOfGraphObjects);
+					tmpred += tmpcolor.red * antialiasing * antialiasing;
+					tmpgreen += tmpcolor.green * antialiasing * antialiasing;
+					tmpblue += tmpcolor.blue * antialiasing * antialiasing;
 				}
 			}
 
-			totalColor.red = (int)(r);
-			totalColor.green = (int)(g);
-			totalColor.blue = (int)(b);
+			totalcolor.red = (int)(tmpred);
+			totalcolor.green = (int)(tmpgreen);
+			totalcolor.blue = (int)(tmpblue);
 
-			image.PutPixel(totalColor, pointer);
+			image.PutPixel(totalcolor, pointer);
 
 			pointer++;
 		}
 	}
 }
 
+
 int main()
 {
-	ImageClass image(1500, 1000);
+	int NumberOfGraphObjects = 8;
+	ImageClass Image(1500, 1000);
+	CoordClass normalcoords(0.0f, 1.0f, 0.0f);
+	ColorClass planecolor(255, 255, 238); //Seashell color
+	PlaneClass plane(planecolor, normalcoords, 400.f, 1000, -1.0f, 0.f);
 
-	ColorClass color1(175, 240, 240);
-	ColorClass color3(102, 205, 170);
-	ColorClass color2(0, 0, 128);
-	//ColorClass teal(0, 128, 128);
+	CoordClass light1(-200.f, 500.f, 1300.f);
+	CoordClass light2(-100.f, 500.f, 1300.f);
+	LightSourceClass longlight(light1, light2, 0.8f);
 
-	CoordClass center1((float)(-400), (float)(200), (float)(2500));
-	CoordClass center2((float)(400), (float)(200), (float)(2500));
-	CoordClass normal(0, 1.0f, 0);
-	CoordClass light1((float)(-300), (float)(500), (float)(1600));
-	CoordClass light2(300.0, 500.0, 1600.0);
+	ColorClass color1(127, 238, 238); //Aquamarine color
+	ColorClass color2(220, 20, 60); //Crimson color
+	ColorClass color3(0, 191, 255); //DeepSkyBlue color
+	ColorClass color4(255, 215, 0); //Cold color
+	ColorClass color5(238, 130, 238); //Violet color
+	ColorClass color6(0, 255, 0); //Lime color
+	ColorClass color7(172, 255, 47); //GreenYellow color
 
-	SphereClass blueSphere((float)(300), 1000, color1, center1, (float)(1.0));
-	SphereClass purpleSphere((float)(300), 1000, color2, center2, (float)(0.5));
-	PlaneClass whitePlane(normal, 1000, color3, (float)(400), (float)(-1.0));
+	CoordClass center1(-200.f, -150.f, 2200.f);
+	CoordClass center2(100.f, 100.f, 1625.f);
+	CoordClass center3(300.f, 200.f, 1600.f);
+	CoordClass center4(700.f, 200.f, 2200.f);
+	CoordClass center5(400.f, 100.f, 1800.f);
+	CoordClass center6(-700.f, -100.f, 2500.f);
+	CoordClass center7(400.f, -300.f, 1800.f);
+
+	//Color, Center, Radius, specular, reflective, gloss
+	SphereClass sphere1(color1, center1, 250.f, 1000, 0.9f, 0.1f);
+	SphereClass sphere2(color2, center2, 70.f, 800, 0.5f, 0.0f);
+	SphereClass sphere3(color3, center3, 150.f, 1000, 0.0f, 0.0f);
+	SphereClass sphere4(color4, center4, 200.f, 500, 0.0f, 0.1f);
+	SphereClass sphere5(color5, center5, 225.f, 75, 0.3f, 0.0f);
+	SphereClass sphere6(color6, center6, 300.f, 150, 1.0f, 0.0f);
+	SphereClass sphere7(color7, center7, 100.f, 300, 0.0f, 0.1f);
+
+	GraphObjectClass** array = new GraphObjectClass * [NumberOfGraphObjects];
+	array[0] = new PlaneClass(plane);
+	array[1] = new SphereClass(sphere1);
+	array[2] = new SphereClass(sphere2);
+	array[3] = new SphereClass(sphere3);
+	array[4] = new SphereClass(sphere4);
+	array[5] = new SphereClass(sphere5);
+	array[6] = new SphereClass(sphere6);
+	array[7] = new SphereClass(sphere7);
 
 
-	GraphObjectClass** array = new GraphObjectClass * [3];
-	array[0] = new SphereClass(blueSphere);
-	array[1] = new SphereClass(purpleSphere);
-	array[2] = new PlaneClass(whitePlane);
-
-	LightSourceClass longLight(light1, light2, 0.5f);
-
-	std::cout << "rendering...\n";
-
-	SimpleRender(image, array, longLight);
-
-	std::cout << "puting in file...\n";
-
-	image.WriteInFile();
-
-	std::cout << "done!\n";
+	cout << "RENDERING..." << endl;
+	RenderSceneFunction(Image, array, longlight, NumberOfGraphObjects);
+	cout << "WRITING IN FILE..." << endl;
+	Image.WriteInFile();
+	cout << "DONE!!!" << endl;
 
 	return 0;
 }
